@@ -1,0 +1,12 @@
+langgraph
+langchain
+groq
+requests
+python-dotenv
+pydantic
+langchain-groq
+pytest
+yfinance
+feedparser
+
+
