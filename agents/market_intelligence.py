@@ -1,121 +1,271 @@
 from tools.market_data_tools import get_market_data
 from hf_schemas.market_intelligence import MarketIntelligenceOutput
-from pydantic import BaseModel, Field
+
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_groq import ChatGroq
+import os
 
 from dotenv import load_dotenv
-import os
 
 load_dotenv()
 
-# --------------------------------------------------
-# 1️⃣ LLM
-# --------------------------------------------------
+
+# ============================================================
+# 1. LLM
+# ============================================================
+
 llm = ChatGroq(
-    model="llama-3.1-8b-instant",
-    temperature=0
+    model="openai/gpt-oss-20b",
+    temperature=0,
+    
 )
 
-# --------------------------------------------------
-# 2️⃣ Load prompt
-# --------------------------------------------------
+
+# ============================================================
+# 2. LOAD PROMPT
+# ============================================================
+
 def load_prompt() -> str:
-    with open("prompts/market_intelligence.txt", "r", encoding="utf-8") as f:
+
+    with open(
+        "prompts/market_intelligence.txt",
+        "r",
+        encoding="utf-8"
+    ) as f:
         return f.read()
+
 
 prompt_text = load_prompt()
 
-parser = PydanticOutputParser(pydantic_object=MarketIntelligenceOutput)
 
-# --------------------------------------------------
-# 4️⃣ Prompt template
-# --------------------------------------------------
+# ============================================================
+# 3. OUTPUT PARSER
+# ============================================================
+
+parser = PydanticOutputParser(
+    pydantic_object=MarketIntelligenceOutput
+)
+
+
+# ============================================================
+# 4. PROMPT TEMPLATE
+# ============================================================
+
 template = PromptTemplate(
     template=prompt_text,
-    input_variables=["stock_symbol", "market_data"],
+
+    input_variables=[
+        "stock_symbol",
+        "market_data"
+    ],
+
     partial_variables={
-        "format_instruction": parser.get_format_instructions()
+        "format_instruction":
+            parser.get_format_instructions()
     }
 )
 
-# --------------------------------------------------
-# 5️⃣ Chain
-# --------------------------------------------------
+
+# ============================================================
+# 5. LLM CHAIN
+# ============================================================
+
 chain = template | llm | parser
 
-# --------------------------------------------------
-# 6️⃣ Confidence scoring
-# --------------------------------------------------
+
+# ============================================================
+# 6. CONFIDENCE
+# ============================================================
+
 def compute_confidence(data):
+
     if not data or "error" in data:
         return "low"
 
-    valid = sum(v not in [None, 0, ""] for v in data.values())
-    total = len(data)
+    required_metrics = [
+        "price",
+        "change",
+        "percent_change",
+        "volume",
+        "return_3m",
+        "return_6m",
+        "return_1y",
+        "volatility",
+        "ma_4",
+        "ma_12",
+        "ma_26",
+        
+    ]
 
-    ratio = valid / total if total else 0
+    valid = sum(
+        data.get(metric) is not None
+        for metric in required_metrics
+    )
 
-    if ratio > 0.7:
+    ratio = valid / len(required_metrics)
+
+    if ratio >= 0.8:
         return "high"
-    elif ratio > 0.4:
+
+    elif ratio >= 0.5:
         return "medium"
+
     else:
         return "low"
 
-# --------------------------------------------------
-# 7️⃣ Agent
-# --------------------------------------------------
+
+# ============================================================
+# 7. MARKET INTELLIGENCE AGENT
+# ============================================================
+
 def market_intelligence_agent(state):
+
     symbol = state["stock_symbol"]
+
+
+    # ========================================================
+    # STEP 1: GET MARKET DATA FROM TOOL
+    # ========================================================
 
     market_data = get_market_data(symbol)
 
-    # 🔴 HARD VALIDATION
+
+    # ========================================================
+    # STEP 2: HANDLE API FAILURE
+    # ========================================================
+
     if market_data.get("error"):
+
         return {
             "market_intelligence": {
                 "stock": symbol,
-                "analysis": "Market data unavailable due to API limits or temporary issues.",
+                "error": market_data["error"],
+                "analysis": (
+                    "Market data is currently unavailable "
+                    "due to an API or data retrieval issue."
+                ),
                 "raw_data": market_data,
                 "confidence": "low"
             }
         }
 
-    # 🔹 LLM analysis
+
+    # ========================================================
+    # STEP 3: SEND ALL MARKET METRICS TO LLM
+    # ========================================================
+
     result = chain.invoke({
+
         "stock_symbol": symbol,
+
         "market_data": market_data
     })
 
-    # 🔹 Confidence
-    confidence = compute_confidence(market_data)
 
-    # 🔹 Volume signal
-    volume = market_data.get("volume", 0)
-    volume_signal = "high" if volume > 1_000_000 else "normal"
+    # ========================================================
+    # STEP 4: CONFIDENCE
+    # ========================================================
 
-    # 🔹 Market bias
-    if result.trend == "uptrend":
-        bias = "bullish"
-    elif result.trend == "downtrend":
-        bias = "bearish"
-    else:
-        bias = "neutral"
+    confidence = compute_confidence(
+        market_data
+    )
+
+
+    # ========================================================
+    # STEP 5: RETURN TOOL VALUES + LLM ANALYSIS
+    # ========================================================
 
     return {
+
         "market_intelligence": {
+
+            "stock": symbol,
+
+            # ------------------------------------------------
+            # VALUES DIRECTLY FROM MARKET TOOL
+            # ------------------------------------------------
+
+            "price": market_data["price"],
+
+            "change": market_data["change"],
+
+            "percent_change":
+                market_data["percent_change"],
+
+            "volume":
+                market_data["volume"],
+
+            "return_3m":
+                market_data["return_3m"],
+
+            "return_6m":
+                market_data["return_6m"],
+
+            "return_1y":
+                market_data["return_1y"],
+
+            "volatility":
+                market_data["volatility"],
+
+            "ma_4":
+                market_data["ma_4"],
+
+            "ma_12":
+                market_data["ma_12"],
+
+            "ma_26":
+                market_data["ma_26"],
+                
+            "trend":
+                market_data["trend"],
+            
+            "momentum":
+                market_data["momentum"],     
+
+            
+
+
+            # ------------------------------------------------
+            # INTERPRETATION FROM LLM
+            # ------------------------------------------------
+
             "signals": {
-                "trend": result.trend,
-                "momentum": result.momentum,
-                "volatility_regime": result.volatility_regime,  # ✅ FIXED
-                "percent_change": market_data.get("percent_change"),
-                "volume_signal": volume_signal,                 # ✅ ADDED
-                "market_bias": bias                             # ✅ FIXED
+
+
+                "volatility_regime":
+                    result.volatility_regime,
+
+                "volume_signal":
+                    result.volume_signal,
+
+                "market_bias":
+                    result.market_bias
             },
-            "analysis": result.analysis,
-            "confidence": confidence,
-            "raw_data": market_data
+
+
+            # ------------------------------------------------
+            # LLM ANALYSIS
+            # ------------------------------------------------
+
+            "analysis":
+                result.analysis,
+
+
+            # ------------------------------------------------
+            # METADATA
+            # ------------------------------------------------
+
+            "confidence":
+                confidence,
+
+            "source":
+                market_data.get(
+                    "source",
+                    "alpha_vantage"
+                ),
+
+            "raw_data":
+                market_data
         }
     }

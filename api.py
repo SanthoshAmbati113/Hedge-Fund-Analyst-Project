@@ -7,19 +7,24 @@ import traceback
 from graph.workflow import build_graph
 
 
-# --------------------------------------------------
-# FastAPI App
-# --------------------------------------------------
+# ============================================================
+# FASTAPI APP
+# ============================================================
+
 app = FastAPI(
     title="Hedge Fund AI Analyst API",
-    description="Multi-Agent Financial Intelligence System",
-    version="1.0.0"
+    description=(
+        "Multi-Agent Financial Intelligence System "
+        "for Market, Fundamental, News, Risk and Thesis Analysis"
+    ),
+    version="2.0.0"
 )
 
 
-# --------------------------------------------------
-# CORS (IMPORTANT for Streamlit frontend)
-# --------------------------------------------------
+# ============================================================
+# CORS
+# ============================================================
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -29,84 +34,193 @@ app.add_middleware(
 )
 
 
-# --------------------------------------------------
-# Build LangGraph App Once
-# --------------------------------------------------
+# ============================================================
+# BUILD LANGGRAPH APP
+# ============================================================
+
+# Build once when the API starts.
+# We don't rebuild the graph for every request.
 graph_app = build_graph()
 
 
-# --------------------------------------------------
-# Request Schema
-# --------------------------------------------------
+# ============================================================
+# REQUEST SCHEMA
+# ============================================================
+
 class StockRequest(BaseModel):
     stock_name: str
 
 
-# --------------------------------------------------
-# Health Route
-# --------------------------------------------------
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
 @app.get("/")
 def health_check():
+
     return {
         "status": "running",
-        "service": "Hedge Fund AI Analyst API"
+        "service": "Hedge Fund AI Analyst API",
+        "version": "2.0.0"
     }
 
 
-# --------------------------------------------------
-# Main Analysis Route
-# --------------------------------------------------
+# ============================================================
+# ANALYSIS ROUTE
+# ============================================================
+
 @app.post("/analyze")
 def analyze_stock(request: StockRequest):
+
+    # --------------------------------------------------------
+    # Validate input
+    # --------------------------------------------------------
 
     stock = request.stock_name.strip()
 
     if not stock:
-        raise HTTPException(status_code=400, detail="Stock name cannot be empty")
 
-    # Initial graph state
+        raise HTTPException(
+            status_code=400,
+            detail="Stock name or symbol cannot be empty"
+        )
+
+
+    # --------------------------------------------------------
+    # Initial LangGraph State
+    # --------------------------------------------------------
+
     initial_state = {
+
+        # User input
         "stock_name": stock,
 
-        # populated later
+        # Symbol will be resolved by the graph
         "stock_symbol": "",
 
+        # Agent outputs
         "market_intelligence": {},
         "fundamental_analysis": {},
         "news_narrative": {},
         "risk_scenario": {},
         "final_thesis": {}
     }
-    
+
+
+    # --------------------------------------------------------
+    # Execute Multi-Agent Workflow
+    # --------------------------------------------------------
+
     try:
-        final_state = graph_app.invoke(initial_state)
+
+        final_state = graph_app.invoke(
+            initial_state
+        )
+
+
+        # ----------------------------------------------------
+        # Extract final results
+        # ----------------------------------------------------
+
+        stock_symbol = final_state.get(
+            "stock_symbol",
+            ""
+        )
+
+        market_intelligence = final_state.get(
+            "market_intelligence",
+            {}
+        )
+
+        fundamental_analysis = final_state.get(
+            "fundamental_analysis",
+            {}
+        )
+
+        news_narrative = final_state.get(
+            "news_narrative",
+            {}
+        )
+
+        risk_scenario = final_state.get(
+            "risk_scenario",
+            {}
+        )
+
+        final_thesis = final_state.get(
+            "final_thesis",
+            {}
+        )
+
+
+        # ----------------------------------------------------
+        # Final API Response
+        # ----------------------------------------------------
 
         return {
+
             "success": True,
+
             "stock_name": stock,
-            "stock_symbol": final_state.get("stock_symbol"),
-            "market_intelligence": final_state.get("market_intelligence"),
-            "fundamental_analysis": final_state.get("fundamental_analysis"),
-            "news_narrative": final_state.get("news_narrative"),
-            "risk_scenario": final_state.get("risk_scenario"),
-            "final_thesis": final_state.get("final_thesis")
+
+            "stock_symbol": stock_symbol,
+
+            # ----------------------------------------------
+            # Individual Agent Outputs
+            # ----------------------------------------------
+
+            "market_intelligence":
+                market_intelligence,
+
+            "fundamental_analysis":
+                fundamental_analysis,
+
+            "news_narrative":
+                news_narrative,
+
+            "risk_scenario":
+                risk_scenario,
+
+            # ----------------------------------------------
+            # Final Investment Thesis
+            # ----------------------------------------------
+
+            "final_thesis":
+                final_thesis
         }
 
-    
+
+    # --------------------------------------------------------
+    # Error Handling
+    # --------------------------------------------------------
 
     except Exception as e:
-        print("\n===== FULL ERROR TRACEBACK =====")
+
+        print(
+            "\n===== FULL ERROR TRACEBACK ====="
+        )
+
         traceback.print_exc()
 
+
         raise HTTPException(
-          status_code=500,
-           detail=str(e)
-    )
-    
+            status_code=500,
+            detail={
+                "error": "Analysis pipeline failed",
+                "message": str(e)
+            }
+        )
+
+
+# ============================================================
+# RUN SERVER
+# ============================================================
+
 if __name__ == "__main__":
+
     uvicorn.run(
         "api:app",
         host="0.0.0.0",
         port=8000,
         reload=True
-    )      
+    )

@@ -4,159 +4,412 @@ import time
 from dotenv import load_dotenv
 from pathlib import Path
 
-load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
-API_KEY = os.getenv("NEWS_API_KEY")
-BASE_URL = "https://newsapi.org/v2/everything"
+# ============================================================
+# ENVIRONMENT
+# ============================================================
+
+load_dotenv(
+    Path(__file__).resolve().parents[1] / ".env"
+)
+
+API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
+
+BASE_URL = "https://www.alphavantage.co/query"
 
 
-# --------------------------------------------------
-# 🔥 Relevance Scoring (ONLY scoring, no filtering)
-# --------------------------------------------------
-def relevance_score(article, company):
+# ============================================================
+# THROTTLE
+# ============================================================
 
-    headline = article.get("headline") or ""
-    snippet = article.get("snippet") or ""
+LAST_CALL = 0
 
-    text = f"{headline} {snippet}".lower()
-    company = (company or "").lower()
+
+def throttle():
+
+    global LAST_CALL
+
+    now = time.time()
+
+    # Alpha Vantage: approximately 5 calls/minute
+    if now - LAST_CALL < 12:
+
+        time.sleep(
+            12 - (now - LAST_CALL)
+        )
+
+    LAST_CALL = time.time()
+
+
+# ============================================================
+# RELEVANCE SCORING
+# ============================================================
+
+def relevance_score(article, symbol):
 
     score = 0
 
-    # 🔥 Strong company mention
-    if company in text:
-        score += 3
+    title = (
+        article.get("headline") or ""
+    ).lower()
 
-    # 🔥 HIGH IMPACT signals
-    financial_keywords = [
-        "earnings", "revenue", "profit", "guidance",
-        "stock", "shares", "forecast", "analyst",
-        "downgrade", "upgrade", "target price"
+    summary = (
+        article.get("summary") or ""
+    ).lower()
+
+    text = f"{title} {summary}"
+
+    symbol = (
+        symbol or ""
+    ).lower()
+
+
+    # --------------------------------------------------------
+    # Ticker/company relevance
+    # --------------------------------------------------------
+
+    if symbol in text:
+        score += 5
+
+
+    # --------------------------------------------------------
+    # High-impact financial events
+    # --------------------------------------------------------
+
+    high_impact_keywords = [
+
+        "earnings",
+        "revenue",
+        "profit",
+        "loss",
+        "guidance",
+        "forecast",
+
+        "acquisition",
+        "merger",
+        "takeover",
+
+        "ipo",
+
+        "upgrade",
+        "downgrade",
+        "price target",
+        "analyst",
+
+        "regulation",
+        "lawsuit",
+        "investigation",
+
+        "ceo",
+        "management",
+
+        "dividend",
+        "buyback",
+
+        "product launch",
+        "partnership",
+
+        "bankruptcy",
+        "recall"
     ]
 
-    for k in financial_keywords:
-        if k in text:
-            score += 4
+
+    for keyword in high_impact_keywords:
+
+        if keyword in text:
+            score += 3
+
 
     return score
 
 
-# --------------------------------------------------
-# 🔥 Junk filter (VERY IMPORTANT)
-# --------------------------------------------------
-def is_relevant_article(article, company):
+# ============================================================
+# BASIC ARTICLE VALIDATION
+# ============================================================
 
-    headline = (article.get("headline") or "").lower()
-    snippet = (article.get("snippet") or "").lower()
-    text = f"{headline} {snippet}"
+def is_valid_article(article):
 
-    company = (company or "").lower()
+    headline = article.get("headline")
+    url = article.get("url")
+    summary = article.get("summary")
 
-    # ✅ MUST contain company in headline (strict)
-    if company not in headline:
+    if not headline:
         return False
 
-    # ❌ Remove junk categories
-    junk_keywords = [
-        "nfl", "nba", "cricket", "pokemon", "movie",
-        "celebrity", "tv show", "review", "hands-on",
-        "gaming laptop", "specs", "preview", "guide"
-    ]
+    if not url:
+        return False
 
-    if any(k in text for k in junk_keywords):
+    if not summary:
         return False
 
     return True
 
 
-# --------------------------------------------------
-# 🔥 MAIN FUNCTION
-# --------------------------------------------------
-def get_company_news(company, max_results=10, retries=2):
+# ============================================================
+# FETCH ALPHA VANTAGE NEWS
+# ============================================================
+
+def fetch_news(symbol, limit=30):
 
     if not API_KEY:
-        raise RuntimeError("NEWS_API_KEY not set")
 
-    # 🔥 Stronger query (IMPORTANT)
-    query = f'"{company}" AND (stock OR earnings OR revenue OR business OR company)'
+        raise RuntimeError(
+            "ALPHA_VANTAGE_API_KEY not set"
+        )
+
+
+    throttle()
+
 
     params = {
-        "q": query,
-        "language": "en",
-        "sortBy": "publishedAt",
-        "pageSize": 30,
-        "apiKey": API_KEY
+
+        "function": "NEWS_SENTIMENT",
+
+        "tickers": symbol,
+
+        "sort": "LATEST",
+
+        "limit": limit,
+
+        "apikey": API_KEY
     }
 
-    for attempt in range(retries):
-        try:
-            response = requests.get(BASE_URL, params=params, timeout=10)
-            data = response.json()
 
-            if data.get("status") != "ok":
-                print(f"[Retry {attempt+1}] API error")
-                time.sleep(1)
+    response = requests.get(
+        BASE_URL,
+        params=params,
+        timeout=10
+    )
+
+
+    response.raise_for_status()
+
+    return response.json()
+
+
+# ============================================================
+# MAIN FUNCTION
+# ============================================================
+
+def get_company_news(
+    symbol,
+    max_results=15,
+    candidate_limit=30
+):
+
+    """
+    Fetch recent company-specific news from Alpha Vantage.
+
+    Flow:
+
+        Alpha Vantage NEWS_SENTIMENT
+                ↓
+        ticker-filtered articles
+                ↓
+        basic validation
+                ↓
+        relevance scoring
+                ↓
+        top N articles
+    """
+
+    try:
+
+        # ====================================================
+        # API CALL
+        # ====================================================
+
+        data = fetch_news(
+            symbol,
+            candidate_limit
+        )
+
+
+        # ====================================================
+        # API LIMIT / ERROR HANDLING
+        # ====================================================
+
+        if "Information" in data:
+
+            print(
+                "Alpha Vantage API information:",
+                data["Information"]
+            )
+
+            return []
+
+
+        if "Note" in data:
+
+            print(
+                "Alpha Vantage API limit:",
+                data["Note"]
+            )
+
+            return []
+
+
+        # ====================================================
+        # RAW FEED
+        # ====================================================
+
+        feed = data.get(
+            "feed",
+            []
+        )
+
+
+        if not feed:
+
+            print(
+                f"No news found for {symbol}"
+            )
+
+            return []
+
+
+        # ====================================================
+        # PROCESS ARTICLES
+        # ====================================================
+
+        seen_urls = set()
+
+        scored_articles = []
+
+
+        for item in feed:
+
+            # ------------------------------------------------
+            # Alpha Vantage article structure
+            # ------------------------------------------------
+
+            article = {
+
+                "headline":
+                    item.get("title"),
+
+                "source":
+                    item.get("source"),
+
+                "published_at":
+                    item.get("time_published"),
+
+                "url":
+                    item.get("url"),
+
+                "summary":
+                    item.get("summary"),
+
+                "overall_sentiment_score":
+                    item.get(
+                        "overall_sentiment_score"
+                    ),
+
+                "overall_sentiment_label":
+                    item.get(
+                        "overall_sentiment_label"
+                    ),
+
+                "provider":
+                    "alpha_vantage"
+            }
+
+
+            # ------------------------------------------------
+            # Basic validation
+            # ------------------------------------------------
+
+            if not is_valid_article(
+                article
+            ):
                 continue
 
-            articles = data.get("articles", [])
 
-            if not articles:
-                print(f"[Retry {attempt+1}] No articles found")
-                time.sleep(1)
+            # ------------------------------------------------
+            # Remove duplicates
+            # ------------------------------------------------
+
+            if article["url"] in seen_urls:
+
                 continue
 
-            seen_urls = set()
-            scored_articles = []
 
-            for item in articles:
-                article = {
-                    "headline": item.get("title"),
-                    "source": item.get("source", {}).get("name"),
-                    "published_at": item.get("publishedAt"),
-                    "url": item.get("url"),
-                    "snippet": item.get("description"),
-                    "provider": "newsapi"
-                }
+            # ------------------------------------------------
+            # Relevance score
+            # ------------------------------------------------
 
-                # ❌ Basic validation
-                if not article["headline"] or not article["url"]:
-                    continue
+            score = relevance_score(
+                article,
+                symbol
+            )
 
-                if not article["snippet"]:
-                    continue
 
-                if article["url"] in seen_urls:
-                    continue
+            seen_urls.add(
+                article["url"]
+            )
 
-                # 🔥 HARD FILTER (FIRST)
-                if not is_relevant_article(article, company):
-                    continue
 
-                # 🔥 SCORE (SECOND)
-                score = relevance_score(article, company)
+            scored_articles.append(
+                (
+                    score,
+                    article
+                )
+            )
 
-                if score < 3:
-                    continue
 
-                seen_urls.add(article["url"])
-                scored_articles.append((score, article))
+        # ====================================================
+        # NO VALID ARTICLES
+        # ====================================================
 
-            # 🔴 Retry if nothing useful
-            if not scored_articles:
-                print(f"[Retry {attempt+1}] No relevant articles after filtering")
-                time.sleep(1)
-                continue
+        if not scored_articles:
 
-            # 🔥 Sort by score
-            scored_articles.sort(key=lambda x: x[0], reverse=True)
+            return []
 
-            final_articles = [a for _, a in scored_articles[:max_results]]
 
-            return final_articles
+        # ====================================================
+        # SORT BY RELEVANCE
+        # ====================================================
 
-        except Exception as e:
-            print(f"[Retry {attempt+1}] Error:", e)
-            time.sleep(1)
+        scored_articles.sort(
+            key=lambda x: x[0],
+            reverse=True
+        )
 
-    # ❌ FINAL FAILURE
-    return []
+
+        # ====================================================
+        # RETURN TOP ARTICLES
+        # ====================================================
+
+        final_articles = [
+
+            article
+
+            for _, article
+            in scored_articles[
+                :max_results
+            ]
+
+        ]
+
+
+        return final_articles
+
+
+    except requests.exceptions.RequestException as e:
+
+        print(
+            "News API request error:",
+            e
+        )
+
+        return []
+
+
+    except Exception as e:
+
+        print(
+            "News processing error:",
+            e
+        )
+
+        return []

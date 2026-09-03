@@ -1,18 +1,20 @@
-from pydantic import BaseModel,Field
+from pydantic import BaseModel, Field
+
+
 class MarketIntelligenceOutput(BaseModel):
-    # stock_symbol: str = Field(description="Ticker symbol (e.g., AAPL)")
 
-    # 🔥 Directional signals
-    trend: str = Field(description="uptrend, downtrend, or sideways")
-    momentum: str = Field(description="positive, negative, or neutral")
-    volatility_regime: str = Field(description="low, moderate, or high volatility")
+    volatility_regime: str = Field(
+        description="Classify volatility as low, moderate, or high"
+    )
 
-    # 🔥 NUMERICAL SIGNALS (CRITICAL)
-    percent_change: float = Field(description="Recent price % change")
-    volume_signal: str = Field(description="high, normal, or low volume vs average")
+    volume_signal: str = Field(
+        description="Classify volume as high, normal, or low based on current volume and historical volume"
+    )
 
-    # 🔥 INTERPRETABLE SIGNAL
-    market_bias: str = Field(description="bullish, bearish, or neutral bias")
+    market_bias: str = Field(
+        description="Overall market bias: bullish, bearish, or neutral"
+    )
 
-    # Summary
-    analysis: str = Field(description="Concise market intelligence summary")
+    analysis: str = Field(
+        description="Concise market intelligence summary based on all supplied market metrics"
+    )
