@@ -4,6 +4,8 @@ import time
 from dotenv import load_dotenv
 from pathlib import Path
 
+import logfire
+
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
@@ -47,6 +49,7 @@ def fetch_overview(symbol):
 # -----------------------------
 # MAIN FUNCTION
 # -----------------------------
+@logfire.instrument("tool:get_fundamentals", extract_args=False, record_return=False)
 def get_fundamentals(symbol, retries=2):
     """
     Optimized fundamentals:
@@ -57,7 +60,13 @@ def get_fundamentals(symbol, retries=2):
 
     for attempt in range(retries):
         try:
-            data = fetch_overview(symbol)
+            with logfire.span(
+                "external_api:alpha_vantage_overview",
+                provider="alpha_vantage",
+                symbol=symbol,
+                attempt=attempt + 1,
+            ):
+                data = fetch_overview(symbol)
 
             # 🔴 Validate response
             if not data or "Symbol" not in data:

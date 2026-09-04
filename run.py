@@ -1,4 +1,11 @@
+import observability  # noqa: F401  # must be imported before langgraph/langchain
+
+import logfire
+
+from observability import configure_logfire
 from graph.workflow import build_graph
+
+configure_logfire(service_name="hedge-fund-analyst-cli")
 
 
 
@@ -61,8 +68,18 @@ def run(stock: str):
     print("=" * 60)
     
     try:
-        final_state = app.invoke(initial_state)
+        with logfire.span(
+            "analyze_stock",
+            stock_name=stock,
+            workflow="hedge_fund_analysis",
+        ):
+            final_state = app.invoke(initial_state)
     except ValueError as e:
+        logfire.exception(
+            "analysis pipeline failed",
+            stock_name=stock,
+            error_type=type(e).__name__,
+        )
         print("\n❌ ERROR")
         print("=" * 60)
         print(str(e))

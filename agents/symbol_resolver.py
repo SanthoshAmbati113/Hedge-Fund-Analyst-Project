@@ -2,9 +2,12 @@ import requests
 import os
 import time
 
+import logfire
+
 API_KEY = os.getenv("ALPHA_VANTAGE_API_KEY")
 
 
+@logfire.instrument("tool:resolve_symbol", extract_args=False, record_return=False)
 def resolve_symbol_agent(state):
     # 🔹 Read user input (standardize on stock_name)
     user_input = state.get("stock_name", "").strip()
@@ -12,8 +15,19 @@ def resolve_symbol_agent(state):
     if not user_input:
         raise ValueError("Stock input is empty")
 
+    logfire.info(
+        "symbol resolution started",
+        stock_name=user_input,
+    )
+
     # 🔹 If already looks like a ticker
     if user_input.isupper() and 1 <= len(user_input) <= 5:
+        logfire.info(
+            "symbol resolved from ticker input",
+            stock_name=user_input,
+            stock_symbol=user_input,
+            resolution_method="direct_ticker",
+        )
         return {"stock_symbol": user_input}
 
     # 🔹 Alpha Vantage search
@@ -29,8 +43,13 @@ def resolve_symbol_agent(state):
     # 🔁 single retry (2 attempts total)
     for attempt in range(2):
         try:
-            res = requests.get(url, params=params, timeout=10)
-            data = res.json()
+            with logfire.span(
+                "external_api:alpha_vantage_symbol_search",
+                provider="alpha_vantage",
+                attempt=attempt + 1,
+            ):
+                res = requests.get(url, params=params, timeout=10)
+                data = res.json()
 
             matches = data.get("bestMatches", [])
             if matches:
@@ -48,9 +67,23 @@ def resolve_symbol_agent(state):
     PREFERRED_REGION = "United States"
     for m in matches:
         if m.get("4. region") == PREFERRED_REGION:
-            return {"stock_symbol": m.get("1. symbol").upper()}
+            symbol = m.get("1. symbol").upper()
+            logfire.info(
+                "symbol resolved from search",
+                stock_name=user_input,
+                stock_symbol=symbol,
+                resolution_method="alpha_vantage_search",
+            )
+            return {"stock_symbol": symbol}
 
     # 🔹 fallback → first match
+    symbol = matches[0].get("1. symbol").upper()
+    logfire.info(
+        "symbol resolved from search fallback",
+        stock_name=user_input,
+        stock_symbol=symbol,
+        resolution_method="alpha_vantage_search_fallback",
+    )
     return {
-        "stock_symbol": matches[0].get("1. symbol").upper()
+        "stock_symbol": symbol
     }

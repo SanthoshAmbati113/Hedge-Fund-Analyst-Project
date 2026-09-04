@@ -4,6 +4,8 @@ import time
 import numpy as np
 from dotenv import load_dotenv
 
+import logfire
+
 load_dotenv()
 
 API_KEY =os.getenv('ALPHA_VANTAGE_API_KEY2')
@@ -326,6 +328,7 @@ def compute_weekly_metrics(weekly_data):
 # MAIN FUNCTION
 # ============================================================
 
+@logfire.instrument("tool:get_market_data", extract_args=False, record_return=False)
 def get_market_data(symbol, retries=2):
 
     """
@@ -350,6 +353,13 @@ def get_market_data(symbol, retries=2):
         - Momentum
     """
 
+    logfire.info(
+        "market data fetch started",
+        tool="get_market_data",
+        symbol=symbol,
+        retries=retries,
+    )
+
     for attempt in range(retries):
 
         try:
@@ -358,7 +368,13 @@ def get_market_data(symbol, retries=2):
             # API CALL 1
             # =================================================
 
-            quote_raw = fetch_quote(symbol)
+            with logfire.span(
+                "external_api:alpha_vantage_global_quote",
+                provider="alpha_vantage",
+                symbol=symbol,
+                attempt=attempt + 1,
+            ):
+                quote_raw = fetch_quote(symbol)
 
             if not valid_response(quote_raw):
 
@@ -384,7 +400,13 @@ def get_market_data(symbol, retries=2):
             # API CALL 2
             # =================================================
 
-            weekly_raw = fetch_weekly(symbol)
+            with logfire.span(
+                "external_api:alpha_vantage_weekly_series",
+                provider="alpha_vantage",
+                symbol=symbol,
+                attempt=attempt + 1,
+            ):
+                weekly_raw = fetch_weekly(symbol)
 
             if not valid_response(weekly_raw):
 

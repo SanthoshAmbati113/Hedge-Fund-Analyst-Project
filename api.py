@@ -1,9 +1,14 @@
+import observability  # noqa: F401  # must be imported before langgraph/langchain
+
+import traceback
+
+import logfire
+import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-import uvicorn
-import traceback
 
+from observability import configure_logfire, instrument_fastapi_app
 from graph.workflow import build_graph
 
 
@@ -19,6 +24,9 @@ app = FastAPI(
     ),
     version="2.0.0"
 )
+
+configure_logfire(service_name="hedge-fund-analyst-api")
+instrument_fastapi_app(app)
 
 
 # ============================================================
@@ -113,9 +121,14 @@ def analyze_stock(request: StockRequest):
 
     try:
 
-        final_state = graph_app.invoke(
-            initial_state
-        )
+        with logfire.span(
+            "analyze_stock",
+            stock_name=stock,
+            workflow="hedge_fund_analysis",
+        ):
+            final_state = graph_app.invoke(
+                initial_state
+            )
 
 
         # ----------------------------------------------------
@@ -195,6 +208,12 @@ def analyze_stock(request: StockRequest):
     # --------------------------------------------------------
 
     except Exception as e:
+
+        logfire.exception(
+            "analysis pipeline failed",
+            stock_name=stock,
+            error_type=type(e).__name__,
+        )
 
         print(
             "\n===== FULL ERROR TRACEBACK ====="

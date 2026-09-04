@@ -4,10 +4,7 @@ import time
 from dotenv import load_dotenv
 from pathlib import Path
 
-
-# ============================================================
-# ENVIRONMENT
-# ============================================================
+import logfire
 
 load_dotenv(
     Path(__file__).resolve().parents[1] / ".env"
@@ -191,6 +188,7 @@ def fetch_news(symbol, limit=30):
 # MAIN FUNCTION
 # ============================================================
 
+@logfire.instrument("tool:get_company_news", extract_args=False, record_return=False)
 def get_company_news(
     symbol,
     max_results=15,
@@ -215,14 +213,26 @@ def get_company_news(
 
     try:
 
+        logfire.info(
+            "news fetch started",
+            tool="get_company_news",
+            symbol=symbol,
+            max_results=max_results,
+        )
+
         # ====================================================
         # API CALL
         # ====================================================
 
-        data = fetch_news(
-            symbol,
-            candidate_limit
-        )
+        with logfire.span(
+            "external_api:alpha_vantage_news_sentiment",
+            provider="alpha_vantage",
+            symbol=symbol,
+        ):
+            data = fetch_news(
+                symbol,
+                candidate_limit
+            )
 
 
         # ====================================================

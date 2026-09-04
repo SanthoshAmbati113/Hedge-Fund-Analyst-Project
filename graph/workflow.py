@@ -1,3 +1,6 @@
+import observability  # noqa: F401  # must be imported before langgraph/langchain
+
+import logfire
 from langgraph.graph import StateGraph, END
 from graph.state import HFState
 
@@ -18,21 +21,51 @@ def run_agent(agent, agent_name):
 
     def wrapped_agent(state):
 
-        print(f"\n[▶] Running {agent_name}...")
+        stock_symbol = state.get("stock_symbol") or None
+        stock_name = state.get("stock_name") or None
 
-        try:
+        with logfire.span(
+            f"agent:{agent_name}",
+            agent=agent_name,
+            stock_symbol=stock_symbol,
+            stock_name=stock_name,
+            workflow="hedge_fund_analysis",
+        ):
+            logfire.info(
+                "agent execution started",
+                agent=agent_name,
+                stock_symbol=stock_symbol,
+            )
 
-            result = agent(state)
+            print(f"\n[▶] Running {agent_name}...")
 
-            print(f"[✓] {agent_name} completed successfully")
+            try:
 
-            return result
+                result = agent(state)
 
-        except Exception as e:
+                logfire.info(
+                    "agent execution completed",
+                    agent=agent_name,
+                    stock_symbol=stock_symbol,
+                    status="success",
+                )
 
-            print(f"[✗] {agent_name} failed: {e}")
+                print(f"[✓] {agent_name} completed successfully")
 
-            raise
+                return result
+
+            except Exception as e:
+
+                logfire.exception(
+                    "agent execution failed",
+                    agent=agent_name,
+                    stock_symbol=stock_symbol,
+                    error_type=type(e).__name__,
+                )
+
+                print(f"[✗] {agent_name} failed: {e}")
+
+                raise
 
     return wrapped_agent
 
